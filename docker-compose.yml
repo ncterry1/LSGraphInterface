@@ -1,0 +1,13 @@
+# ~/LSGraphInterface/docker-compose.yml
+services:
+  neo4j:
+    image: neo4j:5.18
+    container_name: lsgraph_neo4j  # <‑‑ unique name to avoid clashes
+    restart: unless-stopped
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/StrongPassword!
+    volumes:
+      - ${NEO4J_DATA_ROOT:-~/neo4j_dbs/lsgraphinterface}:/data

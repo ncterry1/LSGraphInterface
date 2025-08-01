@@ -1,0 +1,9 @@
+MATCH (p:Person)-[rel:SENT]->(q:Person)
+RETURN p.email, rel.subject, rel.timestamp, q.email LIMIT 25
+
+'''
+	p.email	            rel.subject	         rel.timestamp	       q.email
+"alice@finance.company.com"	"Budget Report"	"2024-07-29T09:00:00"	"bob@it.company.com"
+"carol@hr.company.com"	"Hiring Update"	"2024-07-29T10:00:00"	"dave@finance.company.com"
+"bob@it.company.com"	"System Downtime"	"2024-07-29T11:00:00"	"carol@hr.company.com"
+''' 

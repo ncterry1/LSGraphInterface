@@ -1,0 +1,5 @@
+[
+  {"sender":"alice@finance.company.com","receiver":"bob@it.company.com","subject":"Budget Report","timestamp":"2024-07-29T09:00:00"},
+  {"sender":"carol@hr.company.com","receiver":"dave@finance.company.com","subject":"Hiring Update","timestamp":"2024-07-29T10:00:00"},
+  {"sender":"bob@it.company.com","receiver":"carol@hr.company.com","subject":"System Downtime","timestamp":"2024-07-29T11:00:00"}
+]

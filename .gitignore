@@ -1,0 +1,28 @@
+# Python virtual environment
+.venv/
+
+# Environment variables file
+.env
+
+# Neo4j database data (if ever inside repo path)
+neo4j_data/
+neo4j_dbs/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs and reports
+*.log
+.results/
+
+# IDE/editor configs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+
+# Docker Compose override (local settings)
+docker-compose.override.yml

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LSGraphInterface</title>
+  <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
+  <style>
+    /* Wrap analysis text to avoid overflow */
+    #analysis {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-width: 800px;
+      overflow-x: auto;
+    }
+    /* Highlight selected nodes */
+    .selected {
+      border-width: 3;
+      border-color: #FFD700;
+      border-style: solid;
+    }
+  </style>
+</head>
+<body>
+  <div id="cy" style="width:800px; height:600px;"></div>
+  <button id="analyzeBtn" disabled>Analyze Selection</button>
+  <pre id="analysis"></pre>
+  <script>
+    let cy;
+    const selectedNodeIds = [];
+    // Load graph data
+    fetch('/api/graph')
+      .then(res => res.json())
+      .then(data => {
+        cy = cytoscape({
+          container: document.getElementById('cy'),
+          elements: data.elements,
+          style: [
+            { selector: 'node', style: { 'content': 'data(email)' } },
+            { selector: 'edge', style: { 'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'label': 'data(subject)' } },
+            { selector: '.selected', style: { 'border-width': 3, 'border-color': '#FFD700', 'border-style': 'solid' } }
+          ],
+          layout: { name: 'cose' }
+        });
+        // Toggle selection on tap
+        cy.on('tap', 'node', event => {
+          const node = event.target;
+          const id = node.id();
+          const idx = selectedNodeIds.indexOf(id);
+          if (idx === -1) {
+            selectedNodeIds.push(id);
+            node.addClass('selected');
+          } else {
+            selectedNodeIds.splice(idx, 1);
+            node.removeClass('selected');
+          }
+          document.getElementById('analyzeBtn').disabled = selectedNodeIds.length !== 2;
+        });
+      });
+
+    document.getElementById('analyzeBtn').onclick = async () => {
+      // Gather selected node info
+      const infos = selectedNodeIds.map(id => {
+        const node = cy.getElementById(id);
+        return `Node ${id}: ${node.data('email')}`;
+      }).join('');
+
+      // Incident edges
+      const incidentEdges = cy.edges().filter(e =>
+        selectedNodeIds.includes(e.data('source')) ||
+        selectedNodeIds.includes(e.data('target'))
+      );
+      const relInfo = incidentEdges.map(e =>
+        `Edge ${e.id()} from ${e.data('source')} to ${e.data('target')}: subject="${e.data('subject')}", timestamp=${e.data('timestamp')}`
+      ).join('') || 'No incident edges.';
+
+      // Neighbor nodes
+      const neighbors = incidentEdges.map(e => [e.source(), e.target()]).flat();
+      const uniqueNeighbors = neighbors.filter((n, i, arr) => arr.findIndex(m => m.id() === n.id()) === i)
+        .filter(n => !selectedNodeIds.includes(n.id()));
+      const neighborInfo = uniqueNeighbors.map(n =>
+        `Node ${n.id()}: ${n.data('email')}`
+      ).join('') || 'No neighboring nodes.';
+
+      // Build prompt
+      const prompt = `Here is the graph context for analysis:
+
+Selected Nodes:
+${infos}
+
+Incident Edges:
+${relInfo}
+
+Neighboring Nodes:
+${neighborInfo}`;
+
+      const response = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      }).then(r => r.json());
+      document.getElementById('analysis').textContent = response.response;
+    };
+  </script>
+</body>
+</html>
