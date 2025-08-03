@@ -1,0 +1,89 @@
+1. Enhanced Layout Controls
+
+    Dynamic “Repel/Attract” Sliders
+    Let the user fine-tune the CoSE “idealEdgeLength” and “nodeSpacing” on the fly via range inputs, so they can quickly de-juggle crowded layouts without manually editing the code.
+
+    Preset Layout Profiles
+    Offer buttons like “Tight”, “Balanced”, “Spacious” that swap in different layout parameters (e.g. low vs. high spacing), so users don’t have to pick numbers.
+
+2. Richer Node & Edge Styling
+
+    Hover Tooltips
+    Show full email metadata (timestamp, full subject, maybe a snippet of body) on hover, rather than only on analysis.
+
+    Color‐Coding by Domain
+    Assign each node a background hue based on its email domain (e.g. @enron.com, @gmail.com), making clusters immediately visible.
+
+    Edge Thickness / Opacity
+    Thicker or more opaque edges for more frequent communication or more recent timestamps—gives visual weight to “important” relationships.
+
+3. Interactive Filtering & Search
+
+    Date Slider
+    A time‐range slider to only render emails sent within a certain window (e.g. Jan 10–12, 2001). This instantly declutters the graph for temporal analysis.
+
+    Email Search Box
+    A text input to highlight or isolate nodes whose email addresses or subject lines match a keyword.
+
+4. Contextual Side‐Panel
+
+Instead of dumping analysis into a <pre> block at the bottom, open a right‐hand panel that:
+
+    Lists selected node details in a neat card format
+
+    Shows the analysis response in a scrollable, nicely formatted text area
+
+    Offers buttons like “Copy Prompt” or “View Raw JSON”
+
+5. Multi-Node & Thread Analysis
+
+    More than Two Nodes
+    Allow selecting any number of nodes (Ctrl+Click to multi-select) and run a group analysis prompt describing the subgraph’s overall pattern.
+
+    Thread Detection
+    Detect “threads” (chains of back-and-forth emails) automatically, and let the user click a thread to isolate or analyze it as a unit.
+
+6. Prompt Template Tuning
+
+    System Messages & Few-Shot Examples
+    Prepend a short “system” message instructing the LLM how to interpret email graphs, or include one or two mini-examples in the prompt to guide its style.
+
+    Parameter Controls
+    Expose a dropdown for choosing “concise”, “detailed”, or “technical” analysis, which adjusts the prompt accordingly.
+
+7. Performance & Scaling
+
+    Pagination / Lazy Loading
+    When the dataset grows, don’t fetch every node/edge at once. Load only the visible subgraph or the first N emails, then fetch more on demand.
+
+    WebSocket Updates
+    For live ingest (e.g. streaming new emails), use a WebSocket connection so the frontend can dynamically add new nodes/edges without full reload.
+
+8. Aesthetic Polish
+
+    Dark/Light Mode Toggle
+    Let users switch between your current dark theme and a lighter variant.
+
+    Smooth Transitions
+    Animate layout changes and node selections with subtle transitions (Cytoscape supports animated layouts).
+
+    Consistent Typography
+    Use a web-safe or Google-hosted font (e.g. Inter or Roboto) and standardize font sizes for headers, labels, body text.
+
+9. Testing & CI
+
+    Visual Regression Tests
+    Snapshots of the rendered graph for a known dataset to catch styling regressions.
+
+    API Endpoint Coverage
+    Add unit tests for /api/graph, /api/ask, and the email loader script to ensure stability as you iterate.
+
+Next Steps
+
+    Pick 2–3 of these improvements (e.g. hover tooltips, date slider, and side-panel) and prototype in the frontend.
+
+    Iterate on the prompt templates with a “system” message and few-shot examples.
+
+    Add basic unit tests and configure a GitHub Actions workflow to run them on each push.
+
+Focusing on these refinements will give you a tight, user-friendly core experience—ready for richer data and more advanced features down the road.

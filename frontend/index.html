@@ -61,6 +61,7 @@
 
   <!-- Toolbar -->
   <div id="toolbar">
+
     <!-- Layout dropdown -->
     <label style="font-size:0.85rem;">
       Layout:
@@ -76,6 +77,33 @@
     <button id="analyzeBtn" disabled>
       Analyze 2 Nodes
     </button>
+    <!-- Add these inside your #toolbar div, alongside the layout select and analyze button -->
+    <label style="font-size:0.85rem;">
+      Repel:
+      <input
+        type="range"
+        id="edgeLenSlider"
+        min="20" max="200"
+        value="100"
+      />
+      <span id="edgeLenVal">100</span>
+    </label>
+
+    <label style="font-size:0.85rem;">
+      Spacing:
+      <input
+        type="range"
+        id="nodeSpacingSlider"
+        min="20" max="200"
+        value="50"
+      />
+      <span id="nodeSpacingVal">50</span>
+    </label>
+
+    <!-- Preset layout profiles -->
+    <button id="presetTight">Tight</button>
+    <button id="presetBalanced">Balanced</button>
+    <button id="presetSpacious">Spacious</button>
   </div>
 
   <!-- Graph display -->
@@ -92,15 +120,12 @@
 
     // Configuration for different layout algorithms
     const LAYOUT_OPTS = {
-      cose: {
-        name: 'cose',
-        padding: 10
-      },
       concentric: {
         name: 'concentric',
         padding: 10,
         concentric: node => node.degree(),
-        levelWidth: () => 1
+        levelWidth: () => 2,
+        minNodeSpacing: 50
       },
       grid: {
         name: 'grid',
@@ -121,36 +146,30 @@
       cy.layout(LAYOUT_OPTS[name]).run();
     }
 
-    // When user changes layout dropdown, re-run the layout
-    document.getElementById('layoutSelect').onchange = e =>
-      applyLayout(e.target.value);
+    // Handle layout selection changes
+    document.getElementById('layoutSelect').onchange = e => applyLayout(e.target.value);
 
-    // When user clicks "Analyze 2 Nodes"
+    // When the "Analyze 2 Nodes" button is clicked
     document.getElementById('analyzeBtn').onclick = async () => {
-      // Only proceed if exactly two nodes are selected
       if (selected.length !== 2) return;
 
-      // Build strings describing selected nodes
-      const infos = selected
-        .map(n => `Node ${n.id()}: ${n.data('email')}\n`)
-        .join('');
+      // Build descriptions for selected nodes
+      const infos = selected.map(n => `Node ${n.id()}: ${n.data('email')}\n`).join('');
 
-      // Find incident edges connected to those nodes
+      // Gather incident edges
       const incidentEdges = cy.edges().filter(e =>
         selected.some(n =>
           [e.data('source'), e.data('target')].includes(n.id())
         )
       );
 
-      // Describe those edges
+      // Describe edges
       const relInfo =
         incidentEdges
-          .map(
-            e => `Edge ${e.id()} (${e.data('subject') || 'n/a'})\n`
-          )
+          .map(e => `Edge ${e.id()} (${e.data('subject') || 'n/a'})\n`)
           .join('') || 'No incident edges.\n';
 
-      // Determine neighbor nodes (excluding the two selected)
+      // Identify neighbor nodes
       const neighbours = [
         ...new Set(
           incidentEdges
@@ -165,23 +184,55 @@
           .map(n => `Node ${n.id()}: ${n.data('email')}\n`)
           .join('') || 'No neighbour nodes.\n';
 
-      // Construct the prompt to send to the backend
-      const prompt = `Analyze:
-${infos}
-Edges:
-${relInfo}
-Neighbours:
-${neighbourInfo}`;
-
-      // Send prompt to /api/ask and display the response
+      // Construct and send prompt
+      const prompt = `Analyze:\n${infos}Edges:\n${relInfo}Neighbours:\n${neighbourInfo}`;
       const res = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt })
       }).then(r => r.json());
 
-      document.getElementById('analysis').textContent =
-        res.response;
+      document.getElementById('analysis').textContent = res.response;
+    };
+
+      // 1) Read sliders and return COSE parameters
+    function getCoseParams() {
+      const edgeLen  = +document.getElementById('edgeLenSlider').value;
+      const nodeSpace = +document.getElementById('nodeSpacingSlider').value;
+      document.getElementById('edgeLenVal').textContent = edgeLen;
+      document.getElementById('nodeSpacingVal').textContent = nodeSpace;
+      return {
+        name: 'cose',
+        idealEdgeLength: edgeLen,
+        nodeSpacing: () => nodeSpace,
+        padding: 10
+      };
+    }
+
+    // 2) Apply the dynamic COSE layout
+    function applyCose() {
+      cy.layout(getCoseParams()).run();
+    }
+
+    // 3) Wire sliders to re-layout on change
+    document.getElementById('edgeLenSlider').oninput        = applyCose;
+    document.getElementById('nodeSpacingSlider').oninput     = applyCose;
+
+    // 4) Preset buttons
+    document.getElementById('presetTight').onclick    = () => {
+      document.getElementById('edgeLenSlider').value = 50;
+      document.getElementById('nodeSpacingSlider').value = 20;
+      applyCose();
+    };
+    document.getElementById('presetBalanced').onclick = () => {
+      document.getElementById('edgeLenSlider').value = 100;
+      document.getElementById('nodeSpacingSlider').value = 50;
+      applyCose();
+    };
+    document.getElementById('presetSpacious').onclick = () => {
+      document.getElementById('edgeLenSlider').value = 200;
+      document.getElementById('nodeSpacingSlider').value = 100;
+      applyCose();
     };
 
     // Fetch graph data and initialize Cytoscape
@@ -192,7 +243,6 @@ ${neighbourInfo}`;
           container: document.getElementById('cy'),
           elements: elements,
           style: [
-            // Node styling
             {
               selector: 'node',
               style: {
@@ -206,7 +256,6 @@ ${neighbourInfo}`;
                 'text-outline-color': '#3b82f6'
               }
             },
-            // Edge styling
             {
               selector: 'edge',
               style: {
@@ -223,7 +272,6 @@ ${neighbourInfo}`;
                 'text-rotation': 'autorotate'
               }
             },
-            // Styling for selected nodes/edges
             {
               selector: '.selected',
               style: {
@@ -238,31 +286,23 @@ ${neighbourInfo}`;
           ]
         });
 
-        // Apply default CoSE layout
-        applyLayout('cose');
+        applyCose();
 
-        // Handle node click/tap for selection logic
+        // Node selection logic
         cy.on('tap', 'node', evt => {
           const node = evt.target;
-
           if (node.hasClass('selected')) {
-            // Deselect if already selected
             node.removeClass('selected');
             selected = selected.filter(n => n.id() !== node.id());
           } else {
-            // If two are already selected, drop the first
             if (selected.length === 2) {
               selected[0].removeClass('selected');
               selected.shift();
             }
-            // Select the clicked node
             node.addClass('selected');
             selected.push(node);
           }
-
-          // Enable analyze button only when exactly two nodes are selected
-          document.getElementById('analyzeBtn').disabled =
-            selected.length !== 2;
+          document.getElementById('analyzeBtn').disabled = selected.length !== 2;
         });
       });
   </script>

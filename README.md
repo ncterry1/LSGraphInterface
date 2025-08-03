@@ -1,26 +1,54 @@
-# LSGraphInterface – Docker & Neo4j Full Setup Guide
+# LSGraphInterface – Full Setup & Usage Guide (Snapshot v1)
 
-> This document details every step to build and run the LSGraphInterface project: from host prep, to Docker/Neo4j, Python environment, data ingestion, and interactive graph frontend.
-
----
-
-## 0 Prerequisites
-
-- **OS:** Ubuntu 22.04 LTS (or similar) with Bash
-- **Python:** 3.10+ (`python3 --version`)
-- **Git:** latest
-- **Docker Engine:** ≥ 24.x
-- **Browser:** modern (Chrome, Firefox)
-
-**Project root:** `~/LSGraphInterface`
+This snapshot captures the fully working version of the guide with detailed instructions and complete code blocks. Use this as the source of truth.
 
 ---
 
-## 1 Prepare the Host & Install Docker (Terminal 1)
+## Table of Contents
+
+1. Overview
+2. Prepare the Host & Install Docker
+3. Project Skeleton
+4. Python venv & Requirements
+5. Docker & Neo4j Setup
+6. Verification Steps
+7. Data Ingestion Script
+8. Python Connectivity Test (Optional)
+9. Backend (`app.py`)
+10. Frontend (`frontend/index.html`)
+11. Advanced Email Loader
+12. Advanced Email Dataset
+13. Running the Application (Uvicorn & localhost)
+14. Next Steps
+15. Complete File Manifest
+
+---
+
+## 1 Overview
+
+**Goal:** Build an interactive browser-based UI to explore an email-derived knowledge graph in Neo4j, with LLM-powered analysis.
+
+**Components:**
+
+- **Neo4j 5.18** (Docker)
+- **FastAPI** backend (`/api/graph`, `/api/ask`)
+- **Cytoscape.js** frontend
+- **OpenAI-compatible** LLM client
+
+---
+
+## 2 Prepare the Host & Install Docker *(Terminal 1)*
+
+**Step 1: System Update & Essential Tools**
 
 ```bash
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y ca-certificates curl gnupg lsb-release
+```
+
+**Step 2: Add Docker’s Official GPG Key & Repository**
+
+```bash
 sudo mkdir -p /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
   sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -29,62 +57,100 @@ echo \
   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
   https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
   sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-sudo apt update && sudo apt install -y docker-ce docker-ce-cli containerd.io
-sudo systemctl enable docker && sudo systemctl start docker
-sudo usermod -aG docker "$USER"   # then re-log or run: newgrp docker
-
-docker info   # should show client+server info
 ```
 
-> **Troubleshoot** “Cannot connect to the Docker daemon”:\
-> `sudo systemctl status docker` → `sudo systemctl start docker` → `newgrp docker` or prefix with `sudo`.
+**Step 3: Install Docker Engine & Compose**
+
+```bash
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo systemctl enable docker && sudo systemctl start docker
+sudo usermod -aG docker "$USER"   # then re-login or run: newgrp docker
+```
+
+**Step 4: Verify Installation**
+
+```bash
+docker info    # should display client & server info
+docker run hello-world  # test container run
+```
+
+**Troubleshooting**: If you see “Cannot connect to the Docker daemon”:
+
+```bash
+sudo systemctl status docker    # check service
+sudo systemctl start docker     # start if needed
+newgrp docker                   # re-evaluate group membership
+```
 
 ---
 
-## 2 Clone & Scaffold the Project (Terminal 1)
+## 3 Project Skeleton *(Terminal 1)*
+
+**Instructions:** Initialize the Git repo, create the full directory tree (including utility folders), and configure the external Neo4j data folder.
 
 ```bash
+# Go to project root and initialize
 mkdir -p ~/LSGraphInterface && cd ~/LSGraphInterface
 git init
+# Optional: create a Python package marker
 touch __init__.py
 
 # Create directory structure
 dirs=(frontend ai_functions neo4j_project/scripts tests utils results)
-for d in "${dirs[@]}"; do mkdir -p "$d"; done
+for d in "${dirs[@]}"; do
+  mkdir -p "$d"
+done
 
-# Neo4j external data
+# Neo4j external data (keep DB out of Git)
 echo "export NEO4J_DATA_ROOT=\"$HOME/neo4j_dbs/lsgraphinterface\"" >> ~/.bashrc
 source ~/.bashrc
 mkdir -p "$NEO4J_DATA_ROOT"
 
-# .gitignore
-echo -e ".venv/\n.env\nneo4j_dbs/\n__pycache__/\n*.py[cod]\n*.log\n.vscode/\n.idea/\n.DS_Store\ndocker-compose.override.yml" > .gitignore
+# .gitignore – exclude venv, env, and others
+cat > .gitignore <<'EOF'
+.venv/
+.env
+neo4j_dbs/
+__pycache__/
+*.py[cod]
+*.log
+.vscode/
+.idea/
+.DS_Store
+docker-compose.override.yml
+EOF
 ```
 
 ---
 
-## 3 Python Virtual Environment & Dependencies (Terminal 2)
+## 4 Python venv & Requirements *(Terminal 2 – VS Code venv)*
+
+Set up Python environment and dependencies:
 
 ```bash
-cd ~/LSGraphInterface
 python3 -m venv .venv
 source .venv/bin/activate
-
-echo -e "fastapi\nuvicorn\nneo4j\npython-dotenv\nopenai" > requirements.txt
+cat > requirements.txt <<'REQ'
+fastapi
+uvicorn[standard]
+neo4j
+openai
+python-dotenv
+REQ
 pip install -r requirements.txt
 ```
 
-### 3.1 Create `.env`
+Create `.env` with the following environment variables and data root configuration:
 
 ```bash
 cat > .env << 'ENV'
-# LLM / API
+# LLM / API settings
 LLM_API_KEY=
 LLM_BASE_URL=
 LLM_DEFAULT_MODEL=gpt-3.5-turbo
 
-# Neo4j
+# Neo4j configuration
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=StrongPassword!
@@ -94,28 +160,37 @@ ENV
 
 ---
 
-## 4 Docker & Neo4j Setup (Terminal 1)
+## 5 Docker & Neo4j Setup *(Terminal 1)*
 
-### 4-A Pull & Initial Password
+### 5-A Pull Image & Set Initial Password
 
 ```bash
 docker pull neo4j:5.18
+# Set the initial password (one-time)
 docker run --rm neo4j:5.18 neo4j-admin dbms set-initial-password 'StrongPassword!'
 ```
 
-### 4-B Run Neo4j Container
+### 5-B Run Neo4j Container Directly
 
 ```bash
 docker run -d --name lsgraph_neo4j \
-  -p 7474:7474 -p 7687:7687 \
+  -p 7474:7474 \
+  -p 7687:7687 \
   -e NEO4J_AUTH=neo4j/StrongPassword! \
   -v "$NEO4J_DATA_ROOT:/data" \
   neo4j:5.18
 ```
 
-### 4-C Optional `docker-compose.yml`
+*Confirm it’s running:* `docker ps`
+
+### 5-C Optional: Docker Compose
+
+> Use Compose if you prefer YAML configuration or want to add more services (e.g., backend) later.
+
+Create or update `docker-compose.yml` at project root:
 
 ```yaml
+version: "3.8"
 services:
   neo4j:
     image: neo4j:5.18
@@ -130,29 +205,35 @@ services:
       - ${NEO4J_DATA_ROOT}:/data
 ```
 
+Start with Compose:
+
 ```bash
 docker compose up -d
 ```
 
+*Verify:* Browse to [http://localhost:7474](http://localhost:7474) and log in with `neo4j` / `StrongPassword!`.
+
 ---
 
-## 5 Verification Steps
+## 6 Verification Steps *(Terminal 1)*
 
-### 5-A Check Container
+### 6-A Check Container
 
 ```bash
 docker ps
 docker logs lsgraph_neo4j | head -n 20
 ```
 
-### 5-B Neo4j Browser
+### 6-B Neo4j Browser
 
-Open [http://localhost:7474](http://localhost:7474) and log in:
+Open `http://localhost:7474` and log in:
 
-- **Username:** neo4j
-- **Password:** StrongPassword!
+```
+Username: neo4j
+Password: StrongPassword!
+```
 
-### 5-C Cypher Shell
+### 6-C Cypher Shell
 
 ```bash
 docker exec -it lsgraph_neo4j cypher-shell -u neo4j -p StrongPassword!
@@ -161,9 +242,9 @@ MATCH (n) RETURN n LIMIT 5;
 
 ---
 
-## 6 Data Ingestion Script
+## 7 Data Ingestion Script *(Terminal 2)*
 
-Place `email_data.json` in `neo4j_project/scripts/` and run:
+**Instructions:** Place `email_data.json` in `neo4j_project/scripts/` and run:
 
 ```bash
 python neo4j_project/scripts/load_emails.py
@@ -173,74 +254,58 @@ This merges `Person` nodes and `:SENT` relationships.
 
 ---
 
-## 7 Python Connectivity Test (Optional)
+## 8 Python Connectivity Test (Optional)
 
-Create `tests/test_neo4j.py`:
+**Instructions:** Create `tests/test_neo4j.py` with the following, using the modern transaction function API:
 
 ```python
 from neo4j import GraphDatabase
-from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 
-driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-with driver.session() as session:
-    print(session.run("RETURN 'Hello Neo4j' AS msg").single()["msg"])
+URI  = "bolt://localhost:7687"
+AUTH = ("neo4j", "StrongPassword!")
+
+def hello(tx):
+    result = tx.run("RETURN 'Hello Neo4j' AS msg")
+    return result.single()["msg"]
+
+if __name__ == "__main__":
+    driver = GraphDatabase.driver(URI, auth=AUTH)
+    with driver.session() as session:
+        msg = session.execute_read(hello)
+        print(msg)
 ```
 
-Run:
+Run the test:
 
 ```bash
-python tests/test_neo4j.py   # should print Hello Neo4j
+python tests/test_neo4j.py  # should print Hello Neo4j
 ```
 
 ---
 
-## 8 Interactive Graph Frontend & LLM Integration
+## 9 Backend (`app.py`)
 
-1. \*\*Add \*\*\`\` in `app.py` to serve Cytoscape elements.
-2. **Include Cytoscape.js** in `frontend/index.html`, render nodes/edges, enable tap‐selection for two nodes, and an **Analyze Selection** button.
-3. **Build prompt** including selected nodes, incident edges, and neighboring nodes.
-4. **POST** to `/api/ask` and display the LLM’s response.
-
-(See Appendix for full file contents.)
-
----
-
-## Appendix: Core File Listings
-
-### config.py
+**Instructions:** Place this at project root as `app.py`:
 
 ```python
 import os
-from dotenv import load_dotenv
-load_dotenv()
-
-LLM_API_KEY       = os.getenv("LLM_API_KEY")
-LLM_BASE_URL      = os.getenv("LLM_BASE_URL")
-LLM_MODELS        = ["gpt-3.5-turbo", "gpt-4"]
-LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "gpt-3.5-turbo")
-
-NEO4J_URI       = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER      = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD  = os.getenv("NEO4J_PASSWORD", "StrongPassword!")
-NEO4J_DATA_ROOT = os.getenv("NEO4J_DATA_ROOT", os.path.expanduser("~/neo4j_dbs/lsgraphinterface"))
-```
-
-### app.py
-
-```python
-import openai
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+import openai
 from neo4j import GraphDatabase
-from config import (LLM_API_KEY, LLM_BASE_URL, LLM_MODELS, LLM_DEFAULT_MODEL,
-                    NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)
+from config import (
+    LLM_API_KEY, LLM_BASE_URL, LLM_MODELS, LLM_DEFAULT_MODEL,
+    NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+)
 
 def configure_clients():
     openai.api_key = LLM_API_KEY
     openai.api_base = LLM_BASE_URL
+
+driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -248,8 +313,6 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
-
-driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
 class AskRequest(BaseModel):
     prompt: str
@@ -271,235 +334,369 @@ async def api_ask(req: AskRequest):
 @app.get("/api/graph")
 async def get_graph():
     node_q = "MATCH (p:Person) RETURN id(p) AS id, p.email AS email"
-    edge_q = ("MATCH (p:Person)-[r:SENT]->(q:Person) "
-              "RETURN id(p) AS source, id(q) AS target, r.subject AS subject, r.timestamp AS timestamp")
-    elems = []
-    with driver.session() as s:
-        for r in s.run(node_q):
-            elems.append({"data": {"id": str(r['id']), "email": r['email']}})
-        for r in s.run(edge_q):
-            elems.append({"data": {"source": str(r['source']), "target": str(r['target']),
-                                    "subject": r['subject'], "timestamp": r['timestamp']}})
-    return JSONResponse({"elements": elems})
+    edge_q = (
+        "MATCH (p:Person)-[r:SENT]->(q:Person) "
+        "RETURN id(p) AS source, id(q) AS target, r.subject AS subject, r.timestamp AS timestamp"
+    )
+    nodes, edges = [], []
+    with driver.session() as session:
+        for rec in session.run(node_q):
+            nodes.append({"data": {"id": str(rec["id"]), "email": rec["email"]}})
+        for rec in session.run(edge_q):
+            edges.append({"data": {"source": str(rec["source"]), "target": str(rec["target"]), "subject": rec["subject"], "timestamp": rec["timestamp"]}})
+    return JSONResponse({"elements": nodes + edges})
 
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
 ```
 
-### docker-compose.yml
+---
 
-```yaml
-services:
-  neo4j:
-    image: neo4j:5.18
-    container_name: lsgraph_neo4j
-    restart: unless-stopped
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    environment:
-      - NEO4J_AUTH=neo4j/StrongPassword!
-    volumes:
-      - ${NEO4J_DATA_ROOT}:/data
-```
+## 10 Frontend (`frontend/index.html`)
 
-### neo4j\_project/scripts/load\_emails.py
-
-```python
-import os, sys, json
-from neo4j import GraphDatabase
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..')))
-from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
-
-driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-
-def ingest_email(tx, email):
-    tx.run(
-        "MERGE (s:Person {email:$sender})"
-        " MERGE (r:Person {email:$receiver})"
-        " MERGE (s)-[rel:SENT {subject:$subject, timestamp:$timestamp}]->(r)",
-        sender=email['sender'], receiver=email['receiver'],
-        subject=email['subject'], timestamp=email['timestamp']
-    )
-
-if __name__ == '__main__':
-    path = os.path.join(os.path.dirname(__file__), 'email_data.json')
-    with open(path) as f:
-        emails = json.load(f)
-    with driver.session() as session:
-        for e in emails:
-            session.execute_write(ingest_email, e)
-    print(f"Ingested {len(emails)} emails.")
-```
-
-### neo4j\_project/scripts/email\_data.json
-
-```json
-[
-  {"sender":"alice@finance.company.com","receiver":"bob@it.company.com","subject":"Budget Report","timestamp":"2024-07-29T09:00:00"},
-  {"sender":"carol@hr.company.com","receiver":"dave@finance.company.com","subject":"Hiring Update","timestamp":"2024-07-29T10:00:00"},
-  {"sender":"bob@it.company.com","receiver":"carol@hr.company.com","subject":"System Downtime","timestamp":"2024-07-29T11:00:00"}
-]
-```
-
-### tests/query\_emails.py
-
-```python
-import os, sys
-from neo4j import GraphDatabase
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
-
-driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-with driver.session() as session:
-    for r in session.run(
-        "MATCH (p:Person)-[r:SENT]->(q:Person) RETURN p.email AS sender, r.subject AS subject LIMIT 5"
-    ):
-        print(r['sender'], r['subject'])
-```
-
-### frontend/index.html
+**Instructions:** Copy the following complete HTML into `frontend/index.html` to render the graph, configure layouts, and enable two-node analysis:
 
 ```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LSGraphInterface</title>
+
+  <!-- Cytoscape.js for graph visualization -->
   <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
+
+  <!-- Styles -->
   <style>
-    #analysis { white-space: pre-wrap; word-wrap: break-word; max-width:800px; overflow-x:auto; }
-    .selected { border-width:3; border-color:#FFD700; border-style:solid; }
+    /* Base page layout */
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: #1f2937;
+      color: #cbd5e1;
+      font-family: system-ui, sans-serif;
+    }
+
+    /* Top toolbar with layout selector and analyze button */
+    #toolbar {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.4rem;
+      background: #111827;
+      align-items: center;
+    }
+
+    /* Cytoscape graph container */
+    #cy {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    /* Analysis output area */
+    #analysis {
+      white-space: pre-wrap;
+      max-height: 20vh;
+      overflow: auto;
+      padding: 0.5rem;
+      background: #0f172a;
+    }
+
+    /* Shared styles for selects and buttons */
+    select,
+    button {
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 0.35rem 0.6rem;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
-  <div id="cy" style="width:800px; height:600px;"></div>
-  <button id="analyzeBtn" disabled>Analyze Selection</button>
+
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <!-- Layout dropdown -->
+    <label style="font-size:0.85rem;">
+      Layout:
+      <select id="layoutSelect">
+        <option value="cose">CoSE</option>
+        <option value="concentric">Concentric</option>
+        <option value="grid">Grid</option>
+        <option value="breadthfirst">Breadth-First</option>
+      </select>
+    </label>
+
+    <!-- Analyze button (enabled when two nodes are selected) -->
+    <button id="analyzeBtn" disabled>
+      Analyze 2 Nodes
+    </button>
+  </div>
+
+  <!-- Graph display -->
+  <div id="cy"></div>
+
+  <!-- Text output for analysis results -->
   <pre id="analysis"></pre>
+
+  <!-- Main JavaScript -->
   <script>
-    let cy; const selectedNodeIds = [];
-    fetch('/api/graph').then(r=>r.json()).then(data=>{
-      cy=cytoscape({container:document.getElementById('cy'), elements:data.elements,
-        style:[{selector:'node',style:{'content':'data(email)'}},
-               {selector:'edge',style:{'curve-style':'bezier','target-arrow-shape':'triangle','label':'data(subject)'}},
-               {selector:'.selected',style:{'border-width':3,'border-color':'#FFD700','border-style':'solid'}}],
-        layout:{name:'cose'}});
-      cy.on('tap','node',e=>{
-        const n=e.target, id=n.id(), idx=selectedNodeIds.indexOf(id);
-        if(idx===-1){selectedNodeIds.push(id);n.addClass('selected');}
-        else{selectedNodeIds.splice(idx,1);n.removeClass('selected');}
-        document.getElementById('analyzeBtn').disabled=selectedNodeIds.length!==2;
-      });
-    });
-    document.getElementById('analyzeBtn').onclick=async()=>{
-      const infos=selectedNodeIds.map(id=>{
-        const n=cy.getElementById(id);return `Node ${id}: ${n.data('email')}`;}).join('\n');
-      const incident=cy.edges().filter(e=>selectedNodeIds.includes(e.data('source'))||selectedNodeIds.includes(e.data('target')));
-      const relInfo=incident.map(e=>`Edge ${e.id()} from ${e.data('source')} to ${e.data('target')}: subject="${e.data('subject')}", timestamp=${e.data('timestamp')}`).join('\n')||'No incident edges.';
-      const neighbors=incident.map(e=>[e.source(),e.target()]).flat();
-      const uniqueN=neighbors.filter((n,i,a)=>a.findIndex(m=>m.id()===n.id())===i).filter(n=>!selectedNodeIds.includes(n.id()));
-      const neighborInfo=uniqueN.map(n=>`Node ${n.id()}: ${n.data('email')}`).join('\n')||'No neighboring nodes.';
-      const prompt=`Here is the graph context for analysis:\n\nSelected Nodes:\n${infos}\n\nIncident Edges:\n${relInfo}\n\nNeighboring Nodes:\n${neighborInfo}`;
-      const res=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt})}).then(r=>r.json());
-      document.getElementById('analysis').textContent=res.response;
+    // Cytoscape instance and currently selected nodes
+    let cy;
+    let selected = [];
+
+    // Configuration for different layout algorithms
+    const LAYOUT_OPTS = {
+      cose: {
+        name: 'cose',
+        idealEdgeLength: 100,
+        nodeSpacing: () => 50,
+        padding: 10
+      },
+      concentric: {
+        name: 'concentric',
+        padding: 10,
+        concentric: node => node.degree(),
+        levelWidth: () => 2,
+        minNodeSpacing: 50
+      },
+      grid: {
+        name: 'grid',
+        padding: 10
+      },
+      breadthfirst: {
+        name: 'breadthfirst',
+        padding: 10,
+        directed: true
+      }
     };
+
+    /**
+     * Apply a layout by name.
+     * @param {string} name - One of the keys in LAYOUT_OPTS
+     */
+    function applyLayout(name) {
+      cy.layout(LAYOUT_OPTS[name]).run();
+    }
+
+    // Handle layout selection changes
+    document.getElementById('layoutSelect').onchange = e => applyLayout(e.target.value);
+
+    // When the "Analyze 2 Nodes" button is clicked
+    document.getElementById('analyzeBtn').onclick = async () => {
+      if (selected.length !== 2) return;
+
+      // Build descriptions for selected nodes
+      const infos = selected.map(n => `Node ${n.id()}: ${n.data('email')}\n`).join('');
+
+      // Gather incident edges
+      const incidentEdges = cy.edges().filter(e =>
+        selected.some(n =>
+          [e.data('source'), e.data('target')].includes(n.id())
+        )
+      );
+
+      // Describe edges
+      const relInfo =
+        incidentEdges
+          .map(e => `Edge ${e.id()} (${e.data('subject') || 'n/a'})\n`)
+          .join('') || 'No incident edges.\n';
+
+      // Identify neighbor nodes
+      const neighbours = [
+        ...new Set(
+          incidentEdges
+            .map(e => [e.source(), e.target()])
+            .flat()
+        )
+      ].filter(n => !selected.includes(n));
+
+      // Describe neighbor nodes
+      const neighbourInfo =
+        neighbours
+          .map(n => `Node ${n.id()}: ${n.data('email')}\n`)
+          .join('') || 'No neighbour nodes.\n';
+
+      // Construct and send prompt
+      const prompt = `Analyze:\n${infos}Edges:\n${relInfo}Neighbours:\n${neighbourInfo}`;
+      const res = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      }).then(r => r.json());
+
+      document.getElementById('analysis').textContent = res.response;
+    };
+
+    // Fetch graph data and initialize Cytoscape
+    fetch('/api/graph')
+      .then(r => r.json())
+      .then(({ elements }) => {
+        cy = cytoscape({
+          container: document.getElementById('cy'),
+          elements: elements,
+          style: [
+            {
+              selector: 'node',
+              style: {
+                label: 'data(email)',
+                'background-color': '#3b82f6',
+                color: '#ffffff',
+                'text-valign': 'center',
+                'text-halign': 'center',
+                'font-size': '11px',
+                'text-outline-width': 2,
+                'text-outline-color': '#3b82f6'
+              }
+            },
+            {
+              selector: 'edge',
+              style: {
+                label: 'data(subject)',
+                'curve-style': 'bezier',
+                'line-color': '#64748b',
+                'target-arrow-shape': 'triangle',
+                'target-arrow-color': '#64748b',
+                'font-size': '9px',
+                color: '#cbd5e1',
+                'text-background-color': '#334155',
+                'text-background-opacity': 1,
+                'text-background-shape': 'roundrectangle',
+                'text-rotation': 'autorotate'
+              }
+            },
+            {
+              selector: '.selected',
+              style: {
+                'background-color': '#facc15',
+                'line-color': '#facc15',
+                'target-arrow-color': '#facc15',
+                color: '#ffffff',
+                'font-weight': 'bold',
+                'text-outline-width': 0
+              }
+            }
+          ]
+        });
+
+        // Apply default layout
+        applyLayout('cose');
+
+        // Node selection logic
+        cy.on('tap', 'node', evt => {
+          const node = evt.target;
+          if (node.hasClass('selected')) {
+            node.removeClass('selected');
+            selected = selected.filter(n => n.id() !== node.id());
+          } else {
+            if (selected.length === 2) {
+              selected[0].removeClass('selected');
+              selected.shift();
+            }
+            node.addClass('selected');
+            selected.push(node);
+          }
+          document.getElementById('analyzeBtn').disabled = selected.length !== 2;
+        });
+      });
   </script>
 </body>
 </html>
 ```
 
-## 9 .gitignore Recommendations
+---
 
-Add this to your project root’s `` to keep secrets, caches, and large artifacts out of Git:
+## 11 Advanced Email Loader
 
-```gitignore
-# Python virtual env
-.venv/
+**Instructions:** Place this script in `neo4j_project/scripts/load_emails.py`:
 
-# Secrets / local config
-.env
+```python
+import sys, os, json
+from neo4j import GraphDatabase
+# ensure project root in path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..')))
+from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+import pathlib
 
-# Local Neo4j data (external path)
-neo4j_dbs/
+DATA_FILE = pathlib.Path(__file__).with_name("email_data.json")
 
-# Byte‑code & caches
-__pycache__/
-*.py[cod]
-*$py.class
+driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
-# Logs / scratch output
-*.log
-results/
-
-# IDE / editor junk
-.vscode/
-.idea/
-.DS_Store
-
-# Local docker‑compose overrides
-docker-compose.override.yml
+with driver.session() as session:
+    emails = json.loads(DATA_FILE.read_text())
+    for mail in emails:
+        sender, to, subject, ts = mail["from"], mail["to"], mail["subject"], mail["timestamp"]
+        session.run("MERGE (p:Person {email:$sender})", sender=sender)
+        session.run("MERGE (q:Person {email:$to})", to=to)
+        session.run(
+            """
+            MATCH (p:Person {email:$sender}), (q:Person {email:$to})
+            MERGE (p)-[:SENT {subject:$subject, timestamp:$ts}]->(q)
+            """,
+            sender=sender, to=to, subject=subject, ts=ts
+        )
 ```
 
 ---
 
-## 10 Replicating the Environment on Another VM
+## 12 Advanced Email Dataset
 
-1. **Clone the repo** on the new VM:
-   ```bash
-   git clone <repo-url> LSGraphInterface && cd LSGraphInterface
-   ```
-2. **Copy non‑tracked files** from the original VM:
-   ```bash
-   scp user@old-vm:~/LSGraphInterface/.env       .
-   scp -r user@old-vm:~/neo4j_dbs/lsgraphinterface ~/neo4j_dbs/
-   ```
-3. **Re‑export **`` in the new shell:
-   ```bash
-   echo "export NEO4J_DATA_ROOT=$HOME/neo4j_dbs/lsgraphinterface" >> ~/.bashrc
-   source ~/.bashrc
-   ```
-4. **Re‑create the venv & install deps:**
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
-5. **Start Neo4j** (Docker) mounting the copied data, or run the ingest script if you chose a fresh DB.
-6. **Run FastAPI:**
-   ```bash
-   uvicorn app:app --host 0.0.0.0 --port 8000 --reload
-   ```
+**Save** this as `neo4j_project/scripts/email_data.json`:
+
+```json
+[
+  {"from":"jeff.skilling@enron.com","to":"kenneth.lay@enron.com","subject":"Q4 Earnings Call","timestamp":"2001-01-10T09:00:00"},
+  {"from":"louise.kitchen@enron.com","to":"greg.whalley@enron.com","subject":"Gas Market Review","timestamp":"2001-01-11T10:15:00"},
+  {"from":"kenneth.lay@enron.com","to":"jeff.skilling@enron.com","subject":"Re: Q4 Earnings Call","timestamp":"2001-01-12T11:30:00"},
+  {"from":"greg.whalley@enron.com","to":"louise.kitchen@enron.com","subject":"Re: Gas Market Review","timestamp":"2001-01-13T08:45:00"},
+  {"from":"victoria.bartholomew@enron.com","to":"john.dye@enron.com","subject":"Contract Approval","timestamp":"2001-01-14T14:25:00"}
+]
+```
 
 ---
 
-## 11 Cleaning Accidental Secrets from Git History
+## 13 Running the Application (Uvicorn & localhost)
 
-If GitHub push‑protection flags a secret (e.g., OpenAI key in `.env`) you need to:
+From your activated venv:
 
 ```bash
-# 1 Add to .gitignore & untrack
-echo ".env" >> .gitignore
-git rm --cached .env
-
-# 2 Commit the change
-git commit -m "Stop tracking .env"
-
-# 3 Rewrite history to purge old blobs (easiest via GitHub UI)
-#   → GitHub repo ▸ Settings ▸ Code security ▸ Secret scanning ▸ View alert ▸ 'Remove secret'
-#   or locally with git filter-repo / BFG, then force‑push:
-git push --force
+source .venv/bin/activate
+uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Open your browser at [http://localhost:8000](http://localhost:8000) to view the interface.
 
 ---
 
-## 12 Branch House‑Keeping Quick Ref
+## 14 Next Steps
 
-| Task                      | Command                                      |
-| ------------------------- | -------------------------------------------- |
-| Create & switch           | `git checkout -b feature/my-branch`          |
-| Push first time           | `git push -u origin feature/my-branch`       |
-| Delete local branch       | `git branch -d feature/my-branch`            |
-| Force‑delete local branch | `git branch -D feature/my-branch`            |
-| Delete remote branch      | `git push origin --delete feature/my-branch` |
+- Expand schemas (Thread, Message nodes)
+- Refine LLM prompt templates
+- Add search/filter UI controls
+- Implement authentication & secure key management
 
-*End of guide.*
+---
+
+## 15 Complete File Manifest
+
+```
+LSGraphInterface/
+├── .env
+├── app.py
+├── docker-compose.yml
+├── requirements.txt
+├── frontend/
+│   └── index.html
+├── neo4j_project/
+│   └── scripts/
+│       ├── load_emails.py
+│       └── email_data.json
+├── tests/
+│   └── test_neo4j.py
+└── …other util & results folders
+```
+
+---
