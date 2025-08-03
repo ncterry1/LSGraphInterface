@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LSGraphInterface</title>
+
+  <!-- Cytoscape.js for graph visualization -->
+  <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
+
+  <!-- Styles -->
+  <style>
+    /* Base page layout */
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: #1f2937;
+      color: #cbd5e1;
+      font-family: system-ui, sans-serif;
+    }
+
+    /* Top toolbar with layout selector and analyze button */
+    #toolbar {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.4rem;
+      background: #111827;
+      align-items: center;
+    }
+
+    /* Cytoscape graph container */
+    #cy {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    /* Analysis output area */
+    #analysis {
+      white-space: pre-wrap;
+      max-height: 20vh;
+      overflow: auto;
+      padding: 0.5rem;
+      background: #0f172a;
+    }
+
+    /* Shared styles for selects and buttons */
+    select,
+    button {
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 0.35rem 0.6rem;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <!-- Layout dropdown -->
+    <label style="font-size:0.85rem;">
+      Layout:
+      <select id="layoutSelect">
+        <option value="cose">CoSE</option>
+        <option value="concentric">Concentric</option>
+        <option value="grid">Grid</option>
+        <option value="breadthfirst">Breadth-First</option>
+      </select>
+    </label>
+
+    <!-- Analyze button (enabled when two nodes are selected) -->
+    <button id="analyzeBtn" disabled>
+      Analyze 2 Nodes
+    </button>
+  </div>
+
+  <!-- Graph display -->
+  <div id="cy"></div>
+
+  <!-- Text output for analysis results -->
+  <pre id="analysis"></pre>
+
+  <!-- Main JavaScript -->
+  <script>
+    // Cytoscape instance and currently selected nodes
+    let cy;
+    let selected = [];
+
+    // Configuration for different layout algorithms
+    const LAYOUT_OPTS = {
+      cose: {
+        name: 'cose',
+        padding: 10
+      },
+      concentric: {
+        name: 'concentric',
+        padding: 10,
+        concentric: node => node.degree(),
+        levelWidth: () => 1
+      },
+      grid: {
+        name: 'grid',
+        padding: 10
+      },
+      breadthfirst: {
+        name: 'breadthfirst',
+        padding: 10,
+        directed: true
+      }
+    };
+
+    /**
+     * Apply a layout by name.
+     * @param {string} name - One of the keys in LAYOUT_OPTS
+     */
+    function applyLayout(name) {
+      cy.layout(LAYOUT_OPTS[name]).run();
+    }
+
+    // When user changes layout dropdown, re-run the layout
+    document.getElementById('layoutSelect').onchange = e =>
+      applyLayout(e.target.value);
+
+    // When user clicks "Analyze 2 Nodes"
+    document.getElementById('analyzeBtn').onclick = async () => {
+      // Only proceed if exactly two nodes are selected
+      if (selected.length !== 2) return;
+
+      // Build strings describing selected nodes
+      const infos = selected
+        .map(n => `Node ${n.id()}: ${n.data('email')}\n`)
+        .join('');
+
+      // Find incident edges connected to those nodes
+      const incidentEdges = cy.edges().filter(e =>
+        selected.some(n =>
+          [e.data('source'), e.data('target')].includes(n.id())
+        )
+      );
+
+      // Describe those edges
+      const relInfo =
+        incidentEdges
+          .map(
+            e => `Edge ${e.id()} (${e.data('subject') || 'n/a'})\n`
+          )
+          .join('') || 'No incident edges.\n';
+
+      // Determine neighbor nodes (excluding the two selected)
+      const neighbours = [
+        ...new Set(
+          incidentEdges
+            .map(e => [e.source(), e.target()])
+            .flat()
+        )
+      ].filter(n => !selected.includes(n));
+
+      // Describe neighbor nodes
+      const neighbourInfo =
+        neighbours
+          .map(n => `Node ${n.id()}: ${n.data('email')}\n`)
+          .join('') || 'No neighbour nodes.\n';
+
+      // Construct the prompt to send to the backend
+      const prompt = `Analyze:
+${infos}
+Edges:
+${relInfo}
+Neighbours:
+${neighbourInfo}`;
+
+      // Send prompt to /api/ask and display the response
+      const res = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      }).then(r => r.json());
+
+      document.getElementById('analysis').textContent =
+        res.response;
+    };
+
+    // Fetch graph data and initialize Cytoscape
+    fetch('/api/graph')
+      .then(r => r.json())
+      .then(({ elements }) => {
+        cy = cytoscape({
+          container: document.getElementById('cy'),
+          elements: elements,
+          style: [
+            // Node styling
+            {
+              selector: 'node',
+              style: {
+                label: 'data(email)',
+                'background-color': '#3b82f6',
+                color: '#ffffff',
+                'text-valign': 'center',
+                'text-halign': 'center',
+                'font-size': '11px',
+                'text-outline-width': 2,
+                'text-outline-color': '#3b82f6'
+              }
+            },
+            // Edge styling
+            {
+              selector: 'edge',
+              style: {
+                label: 'data(subject)',
+                'curve-style': 'bezier',
+                'line-color': '#64748b',
+                'target-arrow-shape': 'triangle',
+                'target-arrow-color': '#64748b',
+                'font-size': '9px',
+                color: '#cbd5e1',
+                'text-background-color': '#334155',
+                'text-background-opacity': 1,
+                'text-background-shape': 'roundrectangle',
+                'text-rotation': 'autorotate'
+              }
+            },
+            // Styling for selected nodes/edges
+            {
+              selector: '.selected',
+              style: {
+                'background-color': '#facc15',
+                'line-color': '#facc15',
+                'target-arrow-color': '#facc15',
+                color: '#ffffff',
+                'font-weight': 'bold',
+                'text-outline-width': 0
+              }
+            }
+          ]
+        });
+
+        // Apply default CoSE layout
+        applyLayout('cose');
+
+        // Handle node click/tap for selection logic
+        cy.on('tap', 'node', evt => {
+          const node = evt.target;
+
+          if (node.hasClass('selected')) {
+            // Deselect if already selected
+            node.removeClass('selected');
+            selected = selected.filter(n => n.id() !== node.id());
+          } else {
+            // If two are already selected, drop the first
+            if (selected.length === 2) {
+              selected[0].removeClass('selected');
+              selected.shift();
+            }
+            // Select the clicked node
+            node.addClass('selected');
+            selected.push(node);
+          }
+
+          // Enable analyze button only when exactly two nodes are selected
+          document.getElementById('analyzeBtn').disabled =
+            selected.length !== 2;
+        });
+      });
+  </script>
+</body>
+</html>
