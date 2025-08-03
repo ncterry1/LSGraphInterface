@@ -1,5 +1,7 @@
 [
-  {"sender":"alice@finance.company.com","receiver":"bob@it.company.com","subject":"Budget Report","timestamp":"2024-07-29T09:00:00"},
-  {"sender":"carol@hr.company.com","receiver":"dave@finance.company.com","subject":"Hiring Update","timestamp":"2024-07-29T10:00:00"},
-  {"sender":"bob@it.company.com","receiver":"carol@hr.company.com","subject":"System Downtime","timestamp":"2024-07-29T11:00:00"}
+  {"from":"jeff.skilling@enron.com","to":"kenneth.lay@enron.com","subject":"Q4 Earnings Call","timestamp":"2001-01-10T09:00:00"},
+  {"from":"louise.kitchen@enron.com","to":"greg.whalley@enron.com","subject":"Gas Market Review","timestamp":"2001-01-11T10:15:00"},
+  {"from":"kenneth.lay@enron.com","to":"jeff.skilling@enron.com","subject":"Re: Q4 Earnings Call","timestamp":"2001-01-12T11:30:00"},
+  {"from":"greg.whalley@enron.com","to":"louise.kitchen@enron.com","subject":"Re: Gas Market Review","timestamp":"2001-01-13T08:45:00"},
+  {"from":"victoria.bartholomew@enron.com","to":"john.dye@enron.com","subject":"Contract Approval","timestamp":"2001-01-14T14:25:00"}
 ]
