@@ -1,4 +1,4 @@
-1. Enhanced Layout Controls
+1. Enhanced Layout Controls (DONE)
 
     Dynamic “Repel/Attract” Sliders
     Let the user fine-tune the CoSE “idealEdgeLength” and “nodeSpacing” on the fly via range inputs, so they can quickly de-juggle crowded layouts without manually editing the code.
